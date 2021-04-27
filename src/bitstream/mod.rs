@@ -3,6 +3,7 @@ pub use reader::{BitStreamReader, ReadStatus};
 pub use write_error::BitstreamWriteError;
 pub use writer::BitStreamWriter;
 
+mod crc32;
 mod read_error;
 mod reader;
 mod write_error;
@@ -16,8 +17,10 @@ pub struct Packet {
     packet_num: u64,
     /// The granular position of the last sample (`granule`) in the packet.
     granular_position: u64,
-    /// The type of the packet.
-    packet_type: PacketType,
+    /// Paket is a begin of stream marker.
+    bos: bool,
+    /// Paket is a end of stream marker.
+    eos: bool,
 }
 
 /// The type of the packet.

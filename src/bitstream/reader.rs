@@ -13,7 +13,13 @@ pub enum ReadStatus {
 }
 
 /// Generic OGG bitstream reader.
-pub struct BitStreamReader {}
+pub struct BitStreamReader {
+    previous_packet_num: u64,
+    /// caches the current page. As most
+    page_buffer: Vec<u8>,
+    /// Holds temporary data of a packet we try to assemble.
+    segment_data: Vec<u8>,
+}
 
 impl BitStreamReader {
     /// Reads the next packet from the reader.
