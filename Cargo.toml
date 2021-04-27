@@ -12,7 +12,7 @@ edition = "2018"
 
 [features]
 default = ["opus", "vorbis"]
-opus = []
+opus = ["opus-ng"]
 vorbis = ["lewton"]
 
 [dependencies]

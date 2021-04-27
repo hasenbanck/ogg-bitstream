@@ -1,8 +1,10 @@
 pub use read_error::*;
 pub use write_error::*;
 
+#[cfg(feature = "opus")]
 mod opus;
 mod read_error;
+#[cfg(feature = "vorbis")]
 mod vorbis;
 mod write_error;
 
