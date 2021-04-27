@@ -1,0 +1,19 @@
+[package]
+name = "ogg-ng"
+version = "0.2.0"
+authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
+description = "Reads and writes OGG container streams."
+license = "Zlib OR MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/hasenbanck/matroska-demuxer"
+categories = ["multimedia"]
+keywords = ["ogg", "demuxer", "demux", "muxer", "mux"]
+edition = "2018"
+
+[features]
+default = ["opus", "vorbis"]
+opus = []
+vorbis = ["lewton"]
+
+[dependencies]
+lewton = { version = "0.10", default-features = false, optional = true }
