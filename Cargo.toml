@@ -17,3 +17,7 @@ vorbis = ["lewton"]
 
 [dependencies]
 lewton = { version = "0.10", default-features = false, optional = true }
+opus-ng = { version = "0.1", default-features = false, optional = true }
+
+[patch.crates-io]
+opus-ng = { path = "../opus-ng" }

@@ -4,7 +4,7 @@
 #![deny(clippy::as_conversions)]
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
-//! Reads and writes OGG container streams.
+//! Reads and writes OGG container files / streams.
 
 pub use bitstream::*;
 pub use media_mapping::*;
