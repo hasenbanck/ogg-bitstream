@@ -226,7 +226,7 @@ impl BitStreamReader {
         let mut marker_found = 0;
         for _ in 0..MAX_PAGE_SIZE {
             if marker_found == 4 {
-                break;
+                return Ok(());
             }
             let mut buffer = [0_u8; 1];
             reader.read_exact(&mut buffer)?;
@@ -237,7 +237,7 @@ impl BitStreamReader {
             }
         }
 
-        Ok(())
+        Err(BitstreamReadError::UnableToSync)
     }
 
     fn verify_crc32(&mut self, page_size: usize) -> bool {
@@ -332,12 +332,10 @@ impl BitStreamReader {
         let mut buffer = [0_u8; 10];
         let mut granule_position: u64;
 
-        let mut left = 0;
-        let mut right = reader.seek(SeekFrom::End(0))?;
+        let max_right = reader.seek(SeekFrom::End(0))?;
 
-        if target_granule_position >= right {
-            return Ok(());
-        }
+        let mut left = 0;
+        let mut right = max_right;
 
         let mut mid: u64 = 0;
         while left < right {
@@ -351,7 +349,11 @@ impl BitStreamReader {
             }
 
             loop {
-                self.sync_with_next_page(reader)?;
+                if self.sync_with_next_page(reader).is_err() {
+                    reader.seek(SeekFrom::End(0))?;
+                    return Ok(());
+                }
+
                 reader.read_exact(&mut buffer)?;
                 granule_position = parse_u64_le(&buffer[2..]);
 

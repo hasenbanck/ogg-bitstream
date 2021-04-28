@@ -13,6 +13,8 @@ pub enum BitstreamReadError {
     UnhandledBitstreamVersion(u8),
     /// The stream contains interleaved pages, which isn't supported.
     InterleavedPages,
+    /// Unable to sync.
+    UnableToSync,
 }
 
 impl std::fmt::Display for BitstreamReadError {
@@ -36,6 +38,9 @@ impl std::fmt::Display for BitstreamReadError {
                     f,
                     "the stream contains interleaved pages, which isn't supported."
                 )
+            }
+            BitstreamReadError::UnableToSync => {
+                write!(f, "can't sync the next page")
             }
         }
     }
