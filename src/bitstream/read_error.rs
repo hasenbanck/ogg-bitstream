@@ -1,4 +1,4 @@
-//! Bitsream read errors.
+//! Bitstream read errors.
 
 use std::error::Error;
 
@@ -9,6 +9,10 @@ pub enum BitstreamReadError {
     IoError(std::io::Error),
     /// A `std::num::TryFromIntError`.
     TryFromIntError(std::num::TryFromIntError),
+    /// Reader only supports bitstreams of version `0`.
+    UnhandledBitstreamVersion(u8),
+    /// The stream contains interleaved pages, which isn't supported.
+    InterleavedPages,
 }
 
 impl std::fmt::Display for BitstreamReadError {
@@ -19,6 +23,19 @@ impl std::fmt::Display for BitstreamReadError {
             }
             BitstreamReadError::TryFromIntError(err) => {
                 write!(f, "{:?}", err.source())
+            }
+            BitstreamReadError::UnhandledBitstreamVersion(version) => {
+                write!(
+                    f,
+                    "reader only supports bitstreams of version `0`. Found version: {}",
+                    version
+                )
+            }
+            BitstreamReadError::InterleavedPages => {
+                write!(
+                    f,
+                    "the stream contains interleaved pages, which isn't supported."
+                )
             }
         }
     }
@@ -41,6 +58,8 @@ impl std::error::Error for BitstreamReadError {
         match *self {
             BitstreamReadError::IoError(ref e) => Some(e),
             BitstreamReadError::TryFromIntError(ref e) => Some(e),
+            BitstreamReadError::UnhandledBitstreamVersion(_) => None,
+            BitstreamReadError::InterleavedPages => None,
         }
     }
 }

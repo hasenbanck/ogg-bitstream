@@ -11,7 +11,9 @@ keywords = ["ogg", "demuxer", "demux", "muxer", "mux"]
 edition = "2018"
 
 [features]
-default = ["opus", "vorbis"]
+default = ["opus", "vorbis", "decoder", "encoder"]
+decoder = []
+encoder = []
 opus = ["opus-ng"]
 vorbis = ["lewton"]
 

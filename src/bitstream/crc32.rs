@@ -1,5 +1,5 @@
 /// Lookup table for a CRC32 in the normal form with the polynomial 0x04C11DB7.
-static CRC32_LOOKUP_ARRAY: [u32; 256] = crc32_table();
+const CRC32_LOOKUP_ARRAY: [u32; 256] = crc32_table();
 
 #[allow(clippy::as_conversions)]
 const fn crc32_table() -> [u32; 256] {
