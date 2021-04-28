@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::error::Error;
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
 use crate::crc32::crc32_update;
@@ -18,7 +18,7 @@ pub struct Packet {
     data: Vec<u8>,
     /// Unique serial ID of the logical bitstream this packet belongs to.
     bitstream_serial_number: u32,
-    /// The granular position of the last sample (`granule`) in the packet.
+    /// The granule position of the last sample (`granule`) in the packet.
     granule_position: u64,
     /// Paket is a begin of stream marker.
     is_bos: bool,
@@ -37,7 +37,7 @@ impl Packet {
         self.bitstream_serial_number
     }
 
-    /// The granular position of the last sample (`granule`) in the packet.
+    /// The granule position of the last sample (`granule`) in the packet.
     pub fn granule_position(&self) -> u64 {
         self.granule_position
     }
@@ -159,6 +159,7 @@ impl BitStreamReader {
 
             let header_type = self.page_buffer[HEADER_TYPE_INDEX];
             let granule_position = parse_u64_le(&self.page_buffer[GRANULAR_POSITION_RANGE]);
+
             let bitstream_serial_number =
                 parse_u32_le(&self.page_buffer[BITSTREAM_SERIAL_NUMBER_RANGE]);
             let page_sequence_number = parse_u32_le(&self.page_buffer[PAGE_SEQUENCE_NUMBER_RANGE]);
@@ -303,16 +304,71 @@ impl BitStreamReader {
         Ok(page_end)
     }
 
-    /// Seeks to the first packet after the given granular position.
+    /// Seeks to the first packet after the given granule position.
     ///
     /// If the user is seeking outside of the stream, `read_packet()`
     /// will return `false` on the next call.
+    ///
+    /// Be sure to use a `BuffRead` buffer for IO devices for better
+    /// performance.
     pub fn seek<R: Read + Seek>(
-        &self,
-        _reader: &mut R,
-        _granular_position: u64,
+        &mut self,
+        reader: &mut R,
+        target_granule_position: u64,
     ) -> Result<(), BitstreamReadError> {
-        todo!()
+        // The seek is currently implemented as a simple binary search.
+        // There is a lot of room for improvement!
+
+        if target_granule_position == u64::MAX {
+            reader.seek(SeekFrom::End(0))?;
+            return Ok(());
+        }
+
+        if target_granule_position == 0 {
+            reader.seek(SeekFrom::Start(0))?;
+            return Ok(());
+        }
+
+        let mut buffer = [0_u8; 10];
+        let mut granule_position: u64;
+
+        let mut left = 0;
+        let mut right = reader.seek(SeekFrom::End(0))?;
+
+        if target_granule_position >= right {
+            return Ok(());
+        }
+
+        let mut mid: u64 = 0;
+        while left < right {
+            mid = (left + right) / 2;
+
+            reader.seek(SeekFrom::Start(mid))?;
+
+            // Exit when we are close enough.
+            if (right - left) < 100 {
+                return Ok(());
+            }
+
+            loop {
+                self.sync_with_next_page(reader)?;
+                reader.read_exact(&mut buffer)?;
+                granule_position = parse_u64_le(&buffer[2..]);
+
+                if granule_position != u64::MAX {
+                    break;
+                }
+            }
+
+            match granule_position {
+                g if g < target_granule_position => left = mid + 1,
+                g if g > target_granule_position => right = mid - 1,
+                _ => break,
+            }
+        }
+        reader.seek(SeekFrom::Start(mid))?;
+
+        Ok(())
     }
 }
 

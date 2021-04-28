@@ -58,8 +58,7 @@ impl std::error::Error for BitstreamReadError {
         match *self {
             BitstreamReadError::IoError(ref e) => Some(e),
             BitstreamReadError::TryFromIntError(ref e) => Some(e),
-            BitstreamReadError::UnhandledBitstreamVersion(_) => None,
-            BitstreamReadError::InterleavedPages => None,
+            _ => None,
         }
     }
 }
