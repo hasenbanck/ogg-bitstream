@@ -82,8 +82,91 @@ struct QueuedPacket {
     is_complete: bool,
 }
 
-/// Generic OGG bitstream reader.
-pub struct BitStreamReader {
+/// Generic OGG bitstream file reader.
+#[derive(Clone, Debug)]
+pub struct BitStreamFileReader<R: Read + Seek> {
+    inner: BitStreamReader,
+    reader: R,
+}
+
+impl<R: Read + Seek> BitStreamFileReader<R> {
+    /// Creates a new `BitStreamFileReader`.
+    pub fn new(reader: R) -> Self {
+        Self {
+            inner: Default::default(),
+            reader,
+        }
+    }
+
+    /// Consumes the `BitStreamFileReader` and returns the reader.
+    pub fn into_inner(self) -> R {
+        self.reader
+    }
+
+    /// Reads the next packet from the reader.
+    ///
+    /// Will gracefully handle recoverable errors like pages with wrong checksums,
+    /// missing packets and out of sync events.
+    ///
+    /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
+    /// was corrupt / invalid and no data was written into the given frame.
+    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, BitstreamReadError> {
+        self.inner.read_packet(&mut self.reader, packet)
+    }
+
+    /// Seeks to the first page that has an granule position greater or equal
+    /// to th given one for the given logical bitstream.
+    ///
+    /// If the user is seeking outside of the stream, `read_packet()`
+    /// will return the packets of the last page.
+    pub fn seek(
+        &mut self,
+        bitstream_serial_number: u32,
+        target_granule_position: u64,
+    ) -> Result<(), BitstreamReadError> {
+        self.inner.seek(
+            &mut self.reader,
+            bitstream_serial_number,
+            target_granule_position,
+        )
+    }
+}
+
+/// Generic OGG bitstream stream reader.
+#[derive(Clone, Debug)]
+pub struct BitStreamStreamReader<R: Read> {
+    inner: BitStreamReader,
+    reader: R,
+}
+
+impl<R: Read> BitStreamStreamReader<R> {
+    /// Creates a new `BitStreamStreamReader`.
+    pub fn new(reader: R) -> Self {
+        Self {
+            inner: Default::default(),
+            reader,
+        }
+    }
+
+    /// Consumes the `BitStreamStreamReader` and returns the reader.
+    pub fn into_inner(self) -> R {
+        self.reader
+    }
+
+    /// Reads the next packet from the reader.
+    ///
+    /// Will gracefully handle recoverable errors like pages with wrong checksums,
+    /// missing packets and out of sync events.
+    ///
+    /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
+    /// was corrupt / invalid and no data was written into the given frame.
+    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, BitstreamReadError> {
+        self.inner.read_packet(&mut self.reader, packet)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BitStreamReader {
     page_buffer: Box<[u8]>,
     queued_packets: VecDeque<QueuedPacket>,
     current_bitstream_serial_number: u32,
@@ -106,19 +189,7 @@ impl Default for BitStreamReader {
 }
 
 impl BitStreamReader {
-    /// Creates a new BitStreamReader.
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Reads the next packet from the reader.
-    ///
-    /// Will gracefully handle recoverable errors like pages with wrong checksums,
-    /// missing packets and out of sync events.
-    ///
-    /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
-    /// was corrupt / invalid and no data was written into the given frame.
-    pub fn read_packet<R: Read>(
+    fn read_packet<R: Read>(
         &mut self,
         reader: &mut R,
         packet: &mut Packet,
@@ -306,12 +377,7 @@ impl BitStreamReader {
         Ok(page_end)
     }
 
-    /// Seeks to the first page that has an granule position greater or equal
-    /// to th given one for the given logical bitstream.
-    ///
-    /// If the user is seeking outside of the stream, `read_packet()`
-    /// will return the packets of the last page.
-    pub fn seek<R: Read + Seek>(
+    fn seek<R: Read + Seek>(
         &mut self,
         reader: &mut R,
         bitstream_serial_number: u32,
@@ -487,12 +553,14 @@ impl BitStreamReader {
     }
 }
 
+#[derive(Clone, Debug)]
 struct SearchResult {
     packet_start: u64,
     packet_end: u64,
     granule_position: u64,
 }
 
+#[derive(Clone, Debug)]
 struct ProbeResult {
     granule_position: u64,
     bitstream_serial_number: u32,
@@ -517,11 +585,11 @@ mod tests {
             0x4F, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64, 0x01, 0x02, 0x38, 0x01, 0x80, 0xBB,
             0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let mut c = Cursor::new(d);
+        let c = Cursor::new(d);
 
-        let mut br = BitStreamReader::new();
+        let mut br = BitStreamFileReader::new(c);
         let mut packet = Packet::default();
-        let res = br.read_packet(&mut c, &mut packet).unwrap();
+        let res = br.read_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
     }
 
@@ -533,11 +601,11 @@ mod tests {
             0x20, 0x89, 0xF8, 0x01, 0x13, 0x4F, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64, 0x01,
             0x02, 0x38, 0x01, 0x80, 0xBB, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let mut c = Cursor::new(d);
+        let c = Cursor::new(d);
 
-        let mut br = BitStreamReader::new();
+        let mut br = BitStreamFileReader::new(c);
         let mut packet = Packet::default();
-        let res = br.read_packet(&mut c, &mut packet).unwrap();
+        let res = br.read_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
     }
 }

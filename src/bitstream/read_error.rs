@@ -11,8 +11,6 @@ pub enum BitstreamReadError {
     TryFromIntError(std::num::TryFromIntError),
     /// Reader only supports bitstreams of version `0`.
     UnhandledBitstreamVersion(u8),
-    /// The stream contains interleaved pages, which isn't supported.
-    InterleavedPages,
     /// Unable to sync.
     UnableToSync,
 }
@@ -31,12 +29,6 @@ impl std::fmt::Display for BitstreamReadError {
                     f,
                     "reader only supports bitstreams of version `0`. Found version: {}",
                     version
-                )
-            }
-            BitstreamReadError::InterleavedPages => {
-                write!(
-                    f,
-                    "the stream contains interleaved pages, which isn't supported."
                 )
             }
             BitstreamReadError::UnableToSync => {

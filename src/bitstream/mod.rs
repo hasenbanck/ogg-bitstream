@@ -3,7 +3,7 @@ use std::ops::Range;
 #[cfg(feature = "decoder")]
 pub use read_error::BitstreamReadError;
 #[cfg(feature = "decoder")]
-pub use reader::{BitStreamReader, Packet, ReadStatus};
+pub use reader::{BitStreamFileReader, BitStreamStreamReader, Packet, ReadStatus};
 #[cfg(feature = "encoder")]
 pub use write_error::BitstreamWriteError;
 #[cfg(feature = "encoder")]
