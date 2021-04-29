@@ -12,6 +12,17 @@ use crate::{
     SEGMENT_TABLE_INDEX, VERSION_INDEX,
 };
 
+macro_rules! handle_eof {
+    ($err:ident, $action:expr) => {
+        if let Some(err) = $err.source() {
+            if err.downcast_ref::<std::io::Error>().is_some() {
+                $action;
+            }
+        }
+        return Err($err);
+    };
+}
+
 /// A packet inside an OGG stream.
 #[derive(Clone, Debug, Default)]
 pub struct Packet {
@@ -129,23 +140,13 @@ impl BitStreamReader {
 
         loop {
             if let Err(err) = self.sync_with_next_page(reader) {
-                if let Some(err) = err.source() {
-                    if err.downcast_ref::<std::io::Error>().is_some() {
-                        return Ok(ReadStatus::Eof);
-                    }
-                }
-                return Err(err);
+                handle_eof!(err, return Ok(ReadStatus::Eof));
             }
 
             let page_size = match self.read_page_data(reader) {
                 Ok(page_size) => page_size,
                 Err(err) => {
-                    if let Some(err) = err.source() {
-                        if err.downcast_ref::<std::io::Error>().is_some() {
-                            return Ok(ReadStatus::Eof);
-                        }
-                    }
-                    return Err(err);
+                    handle_eof!(err, return Ok(ReadStatus::Eof));
                 }
             };
 
@@ -341,30 +342,45 @@ impl BitStreamReader {
         let mut target = 0;
 
         let mut mid: u64;
-        while left < right {
+        'outer: while left < right {
             mid = (left + right) / 2;
 
             reader.seek(SeekFrom::Start(mid))?;
 
-            // Exit when we are close enough.
-            if (right - left) < 27 {
-                return Ok(());
-            }
-
             let SearchResult {
-                search_start,
                 packet_start,
-                packet_end,
+                packet_end: _,
                 granule_position,
-            } = self.search_next_packet(reader, bitstream_serial_number)?;
+            } = match self.search_next_packet(reader, bitstream_serial_number) {
+                Ok(res) => res,
+                Err(err) => {
+                    handle_eof!(err, break 'outer);
+                }
+            };
 
             target = packet_start;
 
             match granule_position {
-                g if g < target_granule_position => {
-                    left = mid.saturating_add(packet_end - search_start)
+                pos if pos < target_granule_position => left = mid.saturating_add(1),
+                pos if pos > target_granule_position => right = mid.saturating_sub(1),
+                _ => break,
+            }
+
+            // If the search volume is small enough, we switch to linear search.
+            if (right - left) < 1024 {
+                loop {
+                    reader.seek(SeekFrom::Start(left))?;
+                    let SearchResult {
+                        packet_start: _,
+                        packet_end,
+                        granule_position,
+                    } = self.search_next_packet(reader, bitstream_serial_number)?;
+                    if granule_position > target_granule_position {
+                        target = left;
+                        break 'outer;
+                    }
+                    left = packet_end;
                 }
-                _ => right = mid,
             }
         }
         reader.seek(SeekFrom::Start(target))?;
@@ -379,9 +395,7 @@ impl BitStreamReader {
         reader: &mut R,
         bitstream_serial_number: u32,
     ) -> Result<SearchResult, BitstreamReadError> {
-        let initial_start = reader.stream_position()?;
-
-        let mut search_start = initial_start;
+        let mut search_start = reader.stream_position()?;
         let mut packet_start = u64::MAX;
         let mut search_buffer = [0_u8; 100];
 
@@ -420,7 +434,6 @@ impl BitStreamReader {
                     }
 
                     return Ok(SearchResult {
-                        search_start: initial_start,
                         packet_start,
                         packet_end: page.end,
                         granule_position: page.granule_position,
@@ -475,7 +488,6 @@ impl BitStreamReader {
 }
 
 struct SearchResult {
-    search_start: u64,
     packet_start: u64,
     packet_end: u64,
     granule_position: u64,
