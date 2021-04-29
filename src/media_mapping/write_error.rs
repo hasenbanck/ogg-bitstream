@@ -1,46 +1,46 @@
-//! Stream write error.
+//! Media writer errors.
 
 use std::error::Error;
 
-/// Errors thrown by media writer.
+/// Errors thrown by a media writer.
 #[derive(Debug)]
-pub enum WriteError {
+pub enum MediaWriteError {
     /// A `std::io::Error`.
     IoError(std::io::Error),
     /// A `std::num::TryFromIntError`.
     TryFromIntError(std::num::TryFromIntError),
 }
 
-impl std::fmt::Display for WriteError {
+impl std::fmt::Display for MediaWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WriteError::IoError(err) => {
+            MediaWriteError::IoError(err) => {
                 write!(f, "{:?}", err.source())
             }
-            WriteError::TryFromIntError(err) => {
+            MediaWriteError::TryFromIntError(err) => {
                 write!(f, "{:?}", err.source())
             }
         }
     }
 }
 
-impl From<std::io::Error> for WriteError {
-    fn from(err: std::io::Error) -> WriteError {
-        WriteError::IoError(err)
+impl From<std::io::Error> for MediaWriteError {
+    fn from(err: std::io::Error) -> MediaWriteError {
+        MediaWriteError::IoError(err)
     }
 }
 
-impl From<std::num::TryFromIntError> for WriteError {
-    fn from(err: std::num::TryFromIntError) -> WriteError {
-        WriteError::TryFromIntError(err)
+impl From<std::num::TryFromIntError> for MediaWriteError {
+    fn from(err: std::num::TryFromIntError) -> MediaWriteError {
+        MediaWriteError::TryFromIntError(err)
     }
 }
 
-impl std::error::Error for WriteError {
+impl std::error::Error for MediaWriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            WriteError::IoError(ref e) => Some(e),
-            WriteError::TryFromIntError(ref e) => Some(e),
+            MediaWriteError::IoError(ref e) => Some(e),
+            MediaWriteError::TryFromIntError(ref e) => Some(e),
         }
     }
 }

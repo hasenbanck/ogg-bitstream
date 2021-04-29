@@ -16,7 +16,7 @@ mod write_error;
 /// Generic stream seeker trait. Used to abstract the seeking inside streams.
 pub trait StreamSeeker {
     /// Seeks to the first packet after the given granule position.
-    fn seek(granule_position: u64) -> Result<(), ReadError>;
+    fn seek(granule_position: u64) -> Result<(), MediaReadError>;
 }
 
 #[cfg(all(feature = "opus", feature = "decoder"))]
@@ -25,24 +25,27 @@ pub trait StreamReader {
     /// Decodes the next packet of the stream and writes the frames inside the given vector.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet<S: Sample>(&self, frames: &mut Vec<Vec<S>>) -> Result<bool, ReadError>;
+    fn decode_packet<S: Sample>(&self, frames: &mut Vec<Vec<S>>) -> Result<bool, MediaReadError>;
 
     /// Decodes the next packet of the stream and writes the frames inside the given vector with
     /// samples a `f32`.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet_f32(&self, frames: &mut Vec<Vec<f32>>) -> Result<bool, ReadError>;
+    fn decode_packet_f32(&self, frames: &mut Vec<Vec<f32>>) -> Result<bool, MediaReadError>;
 
     /// Decodes all packet of the stream and writes the frames inside the given vector.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet_all<S: Sample>(&self, frames: &mut Vec<Vec<S>>) -> Result<bool, ReadError>;
+    fn decode_packet_all<S: Sample>(
+        &self,
+        frames: &mut Vec<Vec<S>>,
+    ) -> Result<bool, MediaReadError>;
 
     /// Decodes all packet of the stream and writes the frames inside the given vector with
     /// samples a `f32`.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet_all_f32(&self, frames: &mut Vec<Vec<f32>>) -> Result<bool, ReadError>;
+    fn decode_packet_all_f32(&self, frames: &mut Vec<Vec<f32>>) -> Result<bool, MediaReadError>;
 }
 
 #[cfg(all(feature = "vorbis", feature = "decoder"))]
@@ -51,34 +54,34 @@ pub trait AllocatingStreamReader {
     /// Decodes the next packet of the stream and writes the frames into a new vector.
     ///
     /// Returns `None` when we reached the end of the stream.
-    fn decode_packet<S: Sample>(&self) -> Result<Option<Vec<Vec<S>>>, ReadError>;
+    fn decode_packet<S: Sample>(&self) -> Result<Option<Vec<Vec<S>>>, MediaReadError>;
 
     /// Decodes the next packet of the stream and writes the frames into a new vector with
     /// samples a `f32`.
     ///
     /// Returns `None` when we reached the end of the stream.
-    fn decode_packet_f32(&self) -> Result<Option<Vec<Vec<f32>>>, ReadError>;
+    fn decode_packet_f32(&self) -> Result<Option<Vec<Vec<f32>>>, MediaReadError>;
 
     /// Decodes all packet of the stream and writes the frames into a new vector.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet_all<S: Sample>(&self) -> Result<Option<Vec<Vec<S>>>, ReadError>;
+    fn decode_packet_all<S: Sample>(&self) -> Result<Option<Vec<Vec<S>>>, MediaReadError>;
 
     /// Decodes all packet of the stream and writes the frames into a new vector with
     /// samples a `f32`.
     ///
     /// Returns `false` when we reached the end of the stream.
-    fn decode_packet_all_f32(&self) -> Result<Option<Vec<Vec<f32>>>, ReadError>;
+    fn decode_packet_all_f32(&self) -> Result<Option<Vec<Vec<f32>>>, MediaReadError>;
 }
 
 #[cfg(feature = "encoder")]
 /// Generic stream writer trait. Used to abstract the writing of frames.
 pub trait StreamWriter {
     /// Writes the given frames into the stream.
-    fn write_frames<S: Sample>(&self, frames: &[Vec<S>]) -> Result<(), WriteError>;
+    fn write_frames<S: Sample>(&self, frames: &[Vec<S>]) -> Result<(), MediaWriteError>;
 
     /// Writes the given frames of `f32` samples into the stream.
-    fn write_frames_f32(&self, frames: &[Vec<f32>]) -> Result<(), WriteError>;
+    fn write_frames_f32(&self, frames: &[Vec<f32>]) -> Result<(), MediaWriteError>;
 }
 
 #[cfg(any(feature = "encoder", feature = "decoder"))]
