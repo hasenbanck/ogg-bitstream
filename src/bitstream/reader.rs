@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::error::Error;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
 use crate::crc32::crc32_update;
 use crate::{
     parse_u32_le, parse_u64_le, BitstreamReadError, BITSTREAM_SERIAL_NUMBER_RANGE,
-    CONST_HEADER_DATA_RANGE, CRC32_RANGE, GRANULAR_POSITION_RANGE, HEADER_TYPE_INDEX,
+    CONST_HEADER_DATA_RANGE, CRC32_RANGE, GRANULAR_POSITION_RANGE, HEADER_RANGE, HEADER_TYPE_INDEX,
     MAX_PAGE_SIZE, PAGER_MARKER, PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX,
     SEGMENT_TABLE_INDEX, VERSION_INDEX,
 };
@@ -176,8 +177,8 @@ impl BitStreamReader {
             self.current_granule_position = granule_position;
             self.current_is_eos = is_eos;
 
-            // Make sure we only append data to a previous, unfinished packet, if the page sequence is
-            // sequential and the packet is from the same bitstream.
+            // Make sure we only append data to a previous, unfinished packet, if the page sequence
+            // is sequential and the packet is from the same bitstream.
             if !packet.data.is_empty()
                 && (self.current_bitstream_serial_number != bitstream_serial_number
                     || (self.current_page_sequence_number + 1) > page_sequence_number)
@@ -285,9 +286,9 @@ impl BitStreamReader {
             }
         }
 
-        // Handle unfinished packets. They can occur when a packet is bigger than an OGG page.
+        // Handle unfinished packets. They mostly occur when a packet
+        // is bigger than a page would be allowed to be.
         if segment_size != 0 {
-            // TODO create a file later that tests this case.
             let queued_packet = QueuedPacket {
                 range: table_end + read_size..table_end + read_size + segment_size,
                 is_complete: false,
@@ -304,20 +305,23 @@ impl BitStreamReader {
         Ok(page_end)
     }
 
-    /// Seeks to the first packet after the given granule position.
+    /// Seeks to the first page that has an granule position greater or equal
+    /// to th given one for the given logical bitstream.
     ///
     /// If the user is seeking outside of the stream, `read_packet()`
-    /// will return `false` on the next call.
-    ///
-    /// Be sure to use a `BuffRead` buffer for IO devices for better
-    /// performance.
+    /// will return the packets of the last page.
     pub fn seek<R: Read + Seek>(
         &mut self,
         reader: &mut R,
+        bitstream_serial_number: u32,
         target_granule_position: u64,
     ) -> Result<(), BitstreamReadError> {
-        // The seek is currently implemented as a simple binary search.
-        // There is a lot of room for improvement!
+        // We assume that packets that spawn multiple pages end in their own page without any now
+        // packets in that page.
+        // This is currently the behavior the major media mappings (vorbis, opus, flac).
+        // Packets only span multiple pages if they are bigger than the maximum allowed
+        // packet site.
+        self.queued_packets.clear();
 
         if target_granule_position == u64::MAX {
             reader.seek(SeekFrom::End(0))?;
@@ -329,49 +333,159 @@ impl BitStreamReader {
             return Ok(());
         }
 
-        let mut buffer = [0_u8; 10];
-        let mut granule_position: u64;
-
         let max_right = reader.seek(SeekFrom::End(0))?;
 
         let mut left = 0;
         let mut right = max_right;
 
-        let mut mid: u64 = 0;
+        let mut target = 0;
+
+        let mut mid: u64;
         while left < right {
             mid = (left + right) / 2;
 
             reader.seek(SeekFrom::Start(mid))?;
 
             // Exit when we are close enough.
-            if (right - left) < 100 {
+            if (right - left) < 27 {
                 return Ok(());
             }
 
-            loop {
-                if self.sync_with_next_page(reader).is_err() {
-                    reader.seek(SeekFrom::End(0))?;
-                    return Ok(());
-                }
+            let SearchResult {
+                search_start,
+                packet_start,
+                packet_end,
+                granule_position,
+            } = self.search_next_packet(reader, bitstream_serial_number)?;
 
-                reader.read_exact(&mut buffer)?;
-                granule_position = parse_u64_le(&buffer[2..]);
-
-                if granule_position != u64::MAX {
-                    break;
-                }
-            }
+            target = packet_start;
 
             match granule_position {
-                g if g < target_granule_position => left = mid + 1,
-                g if g > target_granule_position => right = mid - 1,
-                _ => break,
+                g if g < target_granule_position => {
+                    left = mid.saturating_add(packet_end - search_start)
+                }
+                _ => right = mid,
             }
         }
-        reader.seek(SeekFrom::Start(mid))?;
+        reader.seek(SeekFrom::Start(target))?;
 
         Ok(())
     }
+
+    /// Returns the granule position of the next, complete packet. The start and end positions are
+    /// the positions that have been searched. A packet can be contained in multiple pages.
+    fn search_next_packet<R: Read + Seek>(
+        &mut self,
+        reader: &mut R,
+        bitstream_serial_number: u32,
+    ) -> Result<SearchResult, BitstreamReadError> {
+        let initial_start = reader.stream_position()?;
+
+        let mut search_start = initial_start;
+        let mut packet_start = u64::MAX;
+        let mut search_buffer = [0_u8; 100];
+
+        'outer: loop {
+            let read = reader.read(&mut search_buffer)?;
+            if read == 0 {
+                return Err(BitstreamReadError::IoError(std::io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "EOF while parsing sync markers",
+                )));
+            }
+
+            let mut i = 0;
+            let mut marker_found = 0;
+            loop {
+                if i >= read {
+                    search_start += 97;
+                    reader.seek(SeekFrom::Start(search_start))?;
+                    continue 'outer;
+                }
+
+                if marker_found == 4 {
+                    let page_start = search_start - 4 + u64::try_from(i)?;
+                    let page = self.probe_page(reader, page_start)?;
+
+                    if page.bitstream_serial_number != bitstream_serial_number {
+                        reader.seek(SeekFrom::Start(page.end))?;
+                        continue 'outer;
+                    }
+
+                    packet_start = packet_start.min(page.start);
+
+                    if page.granule_position == u64::MAX {
+                        reader.seek(SeekFrom::Start(page.end))?;
+                        continue 'outer;
+                    }
+
+                    return Ok(SearchResult {
+                        search_start: initial_start,
+                        packet_start,
+                        packet_end: page.end,
+                        granule_position: page.granule_position,
+                    });
+                }
+                if search_buffer[i] == PAGER_MARKER[marker_found] {
+                    marker_found += 1;
+                } else {
+                    marker_found = 0;
+                }
+
+                i += 1;
+            }
+        }
+    }
+
+    fn probe_page<R: Read + Seek>(
+        &mut self,
+        reader: &mut R,
+        page_start: u64,
+    ) -> Result<ProbeResult, BitstreamReadError> {
+        reader.seek(SeekFrom::Start(page_start))?;
+        reader.read_exact(&mut self.page_buffer[HEADER_RANGE])?;
+
+        let granule_position = parse_u64_le(&self.page_buffer[GRANULAR_POSITION_RANGE]);
+        let bitstream_serial_number =
+            parse_u32_le(&self.page_buffer[BITSTREAM_SERIAL_NUMBER_RANGE]);
+        let table_size = usize::from(self.page_buffer[SEGMENT_COUNT_INDEX]);
+        let table_start = SEGMENT_TABLE_INDEX;
+        let table_end = SEGMENT_TABLE_INDEX + table_size;
+        reader.read_exact(&mut self.page_buffer[table_start..table_end])?;
+
+        let mut payload_size = 0;
+        for lace in self.page_buffer[table_start..table_end].iter() {
+            let bytes = usize::from(*lace);
+            match bytes {
+                255 => continue,
+                _ => {
+                    payload_size += bytes;
+                }
+            }
+        }
+        let page_end = page_start + u64::try_from(table_start + table_size + payload_size)?;
+
+        Ok(ProbeResult {
+            granule_position,
+            bitstream_serial_number,
+            start: page_start,
+            end: page_end,
+        })
+    }
+}
+
+struct SearchResult {
+    search_start: u64,
+    packet_start: u64,
+    packet_end: u64,
+    granule_position: u64,
+}
+
+struct ProbeResult {
+    granule_position: u64,
+    bitstream_serial_number: u32,
+    start: u64,
+    end: u64,
 }
 
 #[cfg(test)]

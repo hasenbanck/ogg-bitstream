@@ -27,6 +27,7 @@ pub(crate) const VERSION_INDEX: usize = 4;
 pub(crate) const HEADER_TYPE_INDEX: usize = 5;
 pub(crate) const SEGMENT_COUNT_INDEX: usize = 26;
 pub(crate) const SEGMENT_TABLE_INDEX: usize = 27;
+pub(crate) const HEADER_RANGE: Range<usize> = Range { start: 0, end: 27 };
 pub(crate) const CONST_HEADER_DATA_RANGE: Range<usize> = Range { start: 4, end: 27 };
 pub(crate) const GRANULAR_POSITION_RANGE: Range<usize> = Range { start: 6, end: 14 };
 pub(crate) const BITSTREAM_SERIAL_NUMBER_RANGE: Range<usize> = Range { start: 14, end: 18 };
