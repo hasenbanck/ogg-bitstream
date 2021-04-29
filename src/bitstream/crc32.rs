@@ -23,10 +23,10 @@ const fn crc32_table() -> [u32; 256] {
     table
 }
 
-/// CRC32 hash function. Direct algorithm, initial val and final XOR = 0, generator polynomial=0x04c11db7.
+/// CRC32 hash function. Direct algorithm, initial val and final XOR = 0, generator polynomial 0x04C11DB7.
 #[allow(clippy::as_conversions)]
-pub(crate) fn crc32_update(current_crc: u32, data: &[u8]) -> u32 {
-    let mut crc: u32 = current_crc;
+pub(crate) fn crc32(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0;
     for byte in data {
         crc = CRC32_LOOKUP_ARRAY[(u32::from(*byte) ^ (crc >> 24)) as usize] ^ (crc << 8);
     }
@@ -54,7 +54,7 @@ mod tests {
         d[24] = 0;
         d[25] = 0;
 
-        let crc32 = crc32_update(0, &d);
+        let crc32 = crc32(&d);
         assert_eq!(u32::from_le_bytes(hash), crc32);
     }
 
@@ -89,7 +89,7 @@ mod tests {
         d[24] = 0;
         d[25] = 0;
 
-        let crc32 = crc32_update(0, &d);
+        let crc32 = crc32(&d);
         assert_eq!(u32::from_le_bytes(hash), crc32);
     }
 }

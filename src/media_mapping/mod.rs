@@ -99,30 +99,23 @@ impl Sample for f32 {
 }
 
 #[cfg(any(feature = "encoder", feature = "decoder"))]
-impl Sample for f64 {
-    fn from_f32(f: f32) -> Self {
-        f64::from(f)
-    }
-}
-
-#[cfg(any(feature = "encoder", feature = "decoder"))]
 #[allow(clippy::as_conversions)]
 impl Sample for i16 {
     fn from_f32(f: f32) -> Self {
-        let mut x: f32 = f * 32768.0;
-        x = x.max(-32768.0);
-        x = x.min(32767.0);
+        let mut x: f32 = f * 32_768.0;
+        x = x.max(-32_768.0);
+        x = x.min(32_767.0);
         x as i16
     }
 }
 
 #[cfg(any(feature = "encoder", feature = "decoder"))]
 #[allow(clippy::as_conversions)]
-impl Sample for i32 {
+impl Sample for u16 {
     fn from_f32(f: f32) -> Self {
-        let mut x: f32 = f * 2_147_483_648.0;
-        x = x.max(-2_147_483_648.0);
-        x = x.min(2_147_483_647.0);
-        x as i32
+        let mut x: f32 = (f * 32_768.0) + 32_768.0;
+        x = x.max(0.0);
+        x = x.min(65_535.0);
+        x as u16
     }
 }

@@ -4,10 +4,10 @@ use std::error::Error;
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
-use crate::crc32::crc32_update;
+use crate::crc32::crc32;
 use crate::{
     parse_u32_le, parse_u64_le, BitstreamReadError, BITSTREAM_SERIAL_NUMBER_RANGE,
-    CONST_HEADER_DATA_RANGE, CRC32_RANGE, GRANULAR_POSITION_RANGE, HEADER_RANGE, HEADER_TYPE_INDEX,
+    CONST_HEADER_DATA_RANGE, CRC32_RANGE, GRANULE_POSITION_RANGE, HEADER_RANGE, HEADER_TYPE_INDEX,
     MAX_PAGE_SIZE, PAGER_MARKER, PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX,
     SEGMENT_TABLE_INDEX, VERSION_INDEX,
 };
@@ -231,7 +231,7 @@ impl BitStreamReader {
             let version = self.page_buffer[VERSION_INDEX];
 
             let header_type = self.page_buffer[HEADER_TYPE_INDEX];
-            let granule_position = parse_u64_le(&self.page_buffer[GRANULAR_POSITION_RANGE]);
+            let granule_position = parse_u64_le(&self.page_buffer[GRANULE_POSITION_RANGE]);
 
             let bitstream_serial_number =
                 parse_u32_le(&self.page_buffer[BITSTREAM_SERIAL_NUMBER_RANGE]);
@@ -296,13 +296,30 @@ impl BitStreamReader {
     }
 
     fn sync_with_next_page<R: Read>(&self, reader: &mut R) -> Result<(), BitstreamReadError> {
+        let mut buffer = [0_u8; 4];
+
+        // Fast path.
+        reader.read_exact(&mut buffer)?;
+        if buffer == PAGER_MARKER {
+            return Ok(());
+        }
+
+        // Count matches.
         let mut marker_found = 0;
+        for byte in &buffer {
+            if *byte == PAGER_MARKER[marker_found] {
+                marker_found += 1;
+            } else {
+                marker_found = 0;
+            }
+        }
+
+        // Re-sync.
         for _ in 0..MAX_PAGE_SIZE {
             if marker_found == 4 {
                 return Ok(());
             }
-            let mut buffer = [0_u8; 1];
-            reader.read_exact(&mut buffer)?;
+            reader.read_exact(&mut buffer[..1])?;
             if buffer[0] == PAGER_MARKER[marker_found] {
                 marker_found += 1;
             } else {
@@ -319,7 +336,7 @@ impl BitStreamReader {
             .iter_mut()
             .for_each(|x| *x = 0);
 
-        let crc32 = crc32_update(0, &self.page_buffer[..page_size]);
+        let crc32 = crc32(&self.page_buffer[..page_size]);
 
         target_crc == crc32
     }
@@ -383,8 +400,8 @@ impl BitStreamReader {
         bitstream_serial_number: u32,
         target_granule_position: u64,
     ) -> Result<(), BitstreamReadError> {
-        // We assume that packets that spawn multiple pages end in their own page without any now
-        // packets in that page.
+        // We assume that packets that spawn multiple pages end in their own page without
+        // any other packets in that page.
         // This is currently the behavior the major media mappings (vorbis, opus, flac).
         // Packets only span multiple pages if they are bigger than the maximum allowed
         // packet site.
@@ -463,7 +480,7 @@ impl BitStreamReader {
     ) -> Result<SearchResult, BitstreamReadError> {
         let mut search_start = reader.stream_position()?;
         let mut packet_start = u64::MAX;
-        let mut search_buffer = [0_u8; 100];
+        let mut search_buffer = [0_u8; 64];
 
         'outer: loop {
             let read = reader.read(&mut search_buffer)?;
@@ -478,7 +495,7 @@ impl BitStreamReader {
             let mut marker_found = 0;
             loop {
                 if i >= read {
-                    search_start += 97;
+                    search_start += 64 - 3;
                     reader.seek(SeekFrom::Start(search_start))?;
                     continue 'outer;
                 }
@@ -524,7 +541,7 @@ impl BitStreamReader {
         reader.seek(SeekFrom::Start(page_start))?;
         reader.read_exact(&mut self.page_buffer[HEADER_RANGE])?;
 
-        let granule_position = parse_u64_le(&self.page_buffer[GRANULAR_POSITION_RANGE]);
+        let granule_position = parse_u64_le(&self.page_buffer[GRANULE_POSITION_RANGE]);
         let bitstream_serial_number =
             parse_u32_le(&self.page_buffer[BITSTREAM_SERIAL_NUMBER_RANGE]);
         let table_size = usize::from(self.page_buffer[SEGMENT_COUNT_INDEX]);

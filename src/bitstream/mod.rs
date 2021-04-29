@@ -7,7 +7,7 @@ pub use reader::{BitStreamFileReader, BitStreamStreamReader, Packet, ReadStatus}
 #[cfg(feature = "encoder")]
 pub use write_error::BitstreamWriteError;
 #[cfg(feature = "encoder")]
-pub use writer::{BitStreamWriter, PacketType};
+pub use writer::BitStreamStreamWriter;
 
 pub(crate) mod crc32;
 
@@ -21,15 +21,18 @@ mod write_error;
 #[cfg(feature = "encoder")]
 mod writer;
 
-pub(crate) const MAX_PAGE_SIZE: usize = 65_307;
+pub(crate) const MAX_PAGE_HEADER_SIZE: usize = 27 + 255;
+pub(crate) const MAX_PAGE_DATA_SIZE: usize = 65_025;
+pub(crate) const MAX_PAGE_SIZE: usize = MAX_PAGE_HEADER_SIZE + MAX_PAGE_DATA_SIZE;
 pub(crate) const PAGER_MARKER: [u8; 4] = [0x4F, 0x67, 0x67, 0x53];
 pub(crate) const VERSION_INDEX: usize = 4;
 pub(crate) const HEADER_TYPE_INDEX: usize = 5;
 pub(crate) const SEGMENT_COUNT_INDEX: usize = 26;
 pub(crate) const SEGMENT_TABLE_INDEX: usize = 27;
 pub(crate) const HEADER_RANGE: Range<usize> = Range { start: 0, end: 27 };
+pub(crate) const PAGER_MARKER_RANGE: Range<usize> = Range { start: 0, end: 4 };
 pub(crate) const CONST_HEADER_DATA_RANGE: Range<usize> = Range { start: 4, end: 27 };
-pub(crate) const GRANULAR_POSITION_RANGE: Range<usize> = Range { start: 6, end: 14 };
+pub(crate) const GRANULE_POSITION_RANGE: Range<usize> = Range { start: 6, end: 14 };
 pub(crate) const BITSTREAM_SERIAL_NUMBER_RANGE: Range<usize> = Range { start: 14, end: 18 };
 pub(crate) const PAGE_SEQUENCE_NUMBER_RANGE: Range<usize> = Range { start: 18, end: 22 };
 pub(crate) const CRC32_RANGE: Range<usize> = Range { start: 22, end: 26 };

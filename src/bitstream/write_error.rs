@@ -9,6 +9,12 @@ pub enum BitstreamWriteError {
     IoError(std::io::Error),
     /// A `std::num::TryFromIntError`.
     TryFromIntError(std::num::TryFromIntError),
+    /// Unknown bitstream serial number.
+    UnknownBitstreamSerialNumber,
+    /// Logical bitstream already initialized.
+    BitstreamAlreadyInitialized,
+    /// Initial packet too big.
+    InitialPacketTooBig,
 }
 
 impl std::fmt::Display for BitstreamWriteError {
@@ -19,6 +25,15 @@ impl std::fmt::Display for BitstreamWriteError {
             }
             BitstreamWriteError::TryFromIntError(err) => {
                 write!(f, "{:?}", err.source())
+            }
+            BitstreamWriteError::UnknownBitstreamSerialNumber => {
+                write!(f, "unknown bitstream serial number")
+            }
+            BitstreamWriteError::BitstreamAlreadyInitialized => {
+                write!(f, "logical bitstream already initialized")
+            }
+            BitstreamWriteError::InitialPacketTooBig => {
+                write!(f, "initial packet too big. Max size: 65_025 byte")
             }
         }
     }
@@ -41,6 +56,7 @@ impl std::error::Error for BitstreamWriteError {
         match *self {
             BitstreamWriteError::IoError(ref e) => Some(e),
             BitstreamWriteError::TryFromIntError(ref e) => Some(e),
+            _ => None,
         }
     }
 }

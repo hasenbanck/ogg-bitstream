@@ -8,15 +8,28 @@
 
 Reads and writes OGG container streams.
 
-Implements:
+## Overview
+
+Implements the following specifications:
 
 * [rfc3533](https://tools.ietf.org/html/rfc3533.html)
 * [rfc7845](https://tools.ietf.org/html/rfc7845.html)
 
-Following media mappings are support:
+Following media mappings are currently supported:
 
 * Opus
 * Vorbis
+
+Further media mappings can be added once Rust native codec implementations are available.
+
+## Features
+
+All the features are enabled by default.
+
+* "decoder": Enables the decoder / bitstream reader.
+* "encoder": Enables the encoder / bitstream writer.
+* "opus": Enables the Vorbis media mapping.
+* "vorbis": Enables the Vorbis media mapping.
 
 ## License
 
