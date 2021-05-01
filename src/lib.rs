@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used)]
 //! Reads and writes OGG bitstreams.
 
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 #[cfg(feature = "reader")]
@@ -59,4 +60,34 @@ pub(crate) fn parse_u64_le(source: &[u8]) -> u64 {
     let mut buffer = [0_u8; 8];
     buffer.copy_from_slice(&source[0..8]);
     u64::from_le_bytes(buffer)
+}
+
+/// Simple helper function to create a random bitstream serial number.
+///
+/// Uses the system time and default hasher to generate a random number.
+/// Obvious to say this kind of randomness is low quality, but fine for
+/// this specific use case.
+#[cfg(feature = "writer")]
+#[allow(clippy::as_conversions)]
+pub fn generate_bitstream_serial_number() -> u32 {
+    let now = std::time::SystemTime::now();
+    let mut hasher = std::collections::hash_map::DefaultHasher::default();
+    now.hash(&mut hasher);
+    let hash = hasher.finish();
+    (hash % u32::MAX as u64) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::panic)]
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn test_generate_bitstream_serial_number() {
+        let x1 = generate_bitstream_serial_number();
+        let x2 = generate_bitstream_serial_number();
+        assert_ne!(x1, x2);
+    }
 }
