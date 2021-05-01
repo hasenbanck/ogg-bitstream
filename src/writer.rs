@@ -3,7 +3,7 @@ use std::io::Write;
 
 use crate::crc32::crc32;
 use crate::{
-    BitstreamWriteError, BITSTREAM_SERIAL_NUMBER_RANGE, CRC32_RANGE, GRANULE_POSITION_RANGE,
+    WriteError, BITSTREAM_SERIAL_NUMBER_RANGE, BOS_VALUE, CRC32_RANGE, GRANULE_POSITION_RANGE,
     HEADER_TYPE_INDEX, MAX_PAGE_DATA_SIZE, MAX_PAGE_SIZE, PAGER_MARKER, PAGER_MARKER_RANGE,
     PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX, SEGMENT_TABLE_INDEX,
 };
@@ -16,6 +16,7 @@ struct StreamState {
     packet_sizes: Vec<usize>,
     page_sequence_number: u32,
     granule_position: u64,
+    header_type: u8,
 }
 
 impl Default for StreamState {
@@ -27,19 +28,20 @@ impl Default for StreamState {
             packet_sizes: Vec::with_capacity(16),
             page_sequence_number: 0,
             granule_position: 0,
+            header_type: 0,
         }
     }
 }
 
 /// Generic OGG bitstream stream writer.
 #[derive(Clone, Debug)]
-pub struct BitStreamStreamWriter<W: Write> {
+pub struct StreamWriter<W: Write> {
     writer: W,
     stream_states: Vec<StreamState>,
     page_buffer: Box<[u8]>,
 }
 
-impl<W: Write> BitStreamStreamWriter<W> {
+impl<W: Write> StreamWriter<W> {
     /// Creates a new `BitStreamStreamWriter`.
     pub fn new(writer: W) -> Self {
         let mut page_buffer = vec![0_u8; MAX_PAGE_SIZE];
@@ -63,17 +65,17 @@ impl<W: Write> BitStreamStreamWriter<W> {
         &mut self,
         bitstream_serial_number: u32,
         first_packet_data: &[u8],
-    ) -> Result<(), BitstreamWriteError> {
+    ) -> Result<(), WriteError> {
         if self
             .stream_states
             .iter()
             .any(|s| s.bitstream_serial_number == bitstream_serial_number)
         {
-            return Err(BitstreamWriteError::BitstreamAlreadyInitialized);
+            return Err(WriteError::BitstreamAlreadyInitialized);
         }
 
         if first_packet_data.len() > MAX_PAGE_DATA_SIZE {
-            return Err(BitstreamWriteError::InitialPacketTooBig);
+            return Err(WriteError::InitialPacketTooBig);
         }
 
         let mut state = StreamState {
@@ -81,20 +83,13 @@ impl<W: Write> BitStreamStreamWriter<W> {
             ..Default::default()
         };
 
-        // BOS
-        let header_type = 0x2;
-
         let size = first_packet_data.len();
         state.packet_sizes.push(size);
         state.data_head = size;
         state.data_buffer[..state.data_head].copy_from_slice(&first_packet_data[..state.data_head]);
+        state.header_type = BOS_VALUE;
 
-        write_page(
-            &mut self.writer,
-            &mut self.page_buffer,
-            header_type,
-            &mut state,
-        )?;
+        write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
 
         Ok(())
     }
@@ -105,19 +100,19 @@ impl<W: Write> BitStreamStreamWriter<W> {
         &mut self,
         bitstream_serial_number: u32,
         _last_packet_data: &[u8],
-    ) -> Result<(), BitstreamWriteError> {
+    ) -> Result<(), WriteError> {
         let index = self
             .stream_states
             .iter()
             .enumerate()
             .find(|(_, s)| s.bitstream_serial_number == bitstream_serial_number)
             .map(|(id, _)| id)
-            .ok_or(BitstreamWriteError::UnknownBitstreamSerialNumber)?;
+            .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
         let state = self.stream_states.remove(index);
 
         // TODO flush existing data
-        // TODO write the last_packet_data
+        // TODO write the last_packet_data (set the header_type)
 
         todo!()
     }
@@ -135,23 +130,23 @@ impl<W: Write> BitStreamStreamWriter<W> {
         _bitstream_serial_number: u64,
         _packet_data: &[u8],
         _granule_position: u64,
-    ) -> Result<(), BitstreamWriteError> {
+    ) -> Result<(), WriteError> {
+        // TODO If the current paket doesn't fit on the current page, flush the page and start a new.
+        //      Set the continuation flag in that case.
+
         todo!()
     }
 
     /// The current page of the logical bitstream is written and a new page is started.
     /// Flushing empty pages is valid.
-    pub fn flush(&mut self, bitstream_serial_number: u32) -> Result<(), BitstreamWriteError> {
+    pub fn flush(&mut self, bitstream_serial_number: u32) -> Result<(), WriteError> {
         let state = self
             .stream_states
             .iter_mut()
             .find(|s| s.bitstream_serial_number == bitstream_serial_number)
-            .ok_or(BitstreamWriteError::UnknownBitstreamSerialNumber)?;
+            .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
-        // TODO We need to track the continuation!
-        let header_type = 0;
-
-        write_page(&mut self.writer, &mut self.page_buffer, header_type, state)?;
+        write_page(&mut self.writer, &mut self.page_buffer, state)?;
 
         Ok(())
     }
@@ -160,9 +155,8 @@ impl<W: Write> BitStreamStreamWriter<W> {
 fn write_page<W: Write>(
     writer: &mut W,
     page_buffer: &mut [u8],
-    header_type: u8,
     state: &mut StreamState,
-) -> Result<(), BitstreamWriteError> {
+) -> Result<(), WriteError> {
     // Write out the segment table.
     let mut segment_count: u8 = 0;
     for packet_size in state.packet_sizes.iter() {
@@ -180,7 +174,7 @@ fn write_page<W: Write>(
     }
 
     // Assemble the page.
-    page_buffer[HEADER_TYPE_INDEX] = header_type;
+    page_buffer[HEADER_TYPE_INDEX] = state.header_type;
     if segment_count == 255 {
         page_buffer[GRANULE_POSITION_RANGE].copy_from_slice(&u64::MAX.to_le_bytes());
     } else {
@@ -227,7 +221,7 @@ mod tests {
         let buffer: Vec<u8> = vec![];
         let cursor = Cursor::new(buffer);
 
-        let mut bw = BitStreamStreamWriter::new(cursor);
+        let mut bw = StreamWriter::new(cursor);
 
         let streams = [
             (12, [0xFF, 0xFF, 0xFF, 0xFF]),
@@ -250,7 +244,7 @@ mod tests {
                 &PAGER_MARKER
             );
             assert_eq!(buffer[offset + VERSION_INDEX], 0);
-            assert_eq!(buffer[offset + HEADER_TYPE_INDEX], 0x2);
+            assert_eq!(buffer[offset + HEADER_TYPE_INDEX], BOS_VALUE);
             assert_eq!(
                 parse_u64_le(
                     &buffer[offset + GRANULE_POSITION_RANGE.start

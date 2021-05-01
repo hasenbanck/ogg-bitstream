@@ -4,7 +4,7 @@ use std::error::Error;
 
 /// Errors that can occur when reading OGG bitstreams.
 #[derive(Debug)]
-pub enum BitstreamReadError {
+pub enum ReadError {
     /// A `std::io::Error`.
     IoError(std::io::Error),
     /// A `std::num::TryFromIntError`.
@@ -15,46 +15,46 @@ pub enum BitstreamReadError {
     UnableToSync,
 }
 
-impl std::fmt::Display for BitstreamReadError {
+impl std::fmt::Display for ReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BitstreamReadError::IoError(err) => {
+            ReadError::IoError(err) => {
                 write!(f, "{:?}", err.source())
             }
-            BitstreamReadError::TryFromIntError(err) => {
+            ReadError::TryFromIntError(err) => {
                 write!(f, "{:?}", err.source())
             }
-            BitstreamReadError::UnhandledBitstreamVersion(version) => {
+            ReadError::UnhandledBitstreamVersion(version) => {
                 write!(
                     f,
                     "reader only supports bitstreams of version `0`. Found version: {}",
                     version
                 )
             }
-            BitstreamReadError::UnableToSync => {
+            ReadError::UnableToSync => {
                 write!(f, "can't sync the next page")
             }
         }
     }
 }
 
-impl From<std::io::Error> for BitstreamReadError {
-    fn from(err: std::io::Error) -> BitstreamReadError {
-        BitstreamReadError::IoError(err)
+impl From<std::io::Error> for ReadError {
+    fn from(err: std::io::Error) -> ReadError {
+        ReadError::IoError(err)
     }
 }
 
-impl From<std::num::TryFromIntError> for BitstreamReadError {
-    fn from(err: std::num::TryFromIntError) -> BitstreamReadError {
-        BitstreamReadError::TryFromIntError(err)
+impl From<std::num::TryFromIntError> for ReadError {
+    fn from(err: std::num::TryFromIntError) -> ReadError {
+        ReadError::TryFromIntError(err)
     }
 }
 
-impl std::error::Error for BitstreamReadError {
+impl std::error::Error for ReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            BitstreamReadError::IoError(ref e) => Some(e),
-            BitstreamReadError::TryFromIntError(ref e) => Some(e),
+            ReadError::IoError(ref e) => Some(e),
+            ReadError::TryFromIntError(ref e) => Some(e),
             _ => None,
         }
     }

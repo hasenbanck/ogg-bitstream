@@ -1,25 +1,19 @@
 [package]
-name = "ogg-ng"
-version = "0.2.0"
+name = "ogg-bitstream"
+version = "0.1.0"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
-description = "Reads and writes OGG container streams."
+description = "Reads and writes OGG bitstreams."
 license = "Zlib OR MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/hasenbanck/matroska-demuxer"
+repository = "https://github.com/hasenbanck/ogg-bitstream"
+documentation = "https://docs.rs/ogg-bitstream"
 categories = ["multimedia"]
-keywords = ["ogg", "demuxer", "demux", "muxer", "mux"]
+keywords = ["ogg", "bitstream"]
 edition = "2018"
 
 [features]
-default = ["opus", "vorbis", "decoder", "encoder"]
-decoder = []
-encoder = []
-opus = ["opus-ng"]
-vorbis = ["lewton"]
+default = ["reader", "writer"]
+reader = []
+writer = []
 
 [dependencies]
-lewton = { version = "0.10", default-features = false, optional = true }
-opus-ng = { version = "0.1", default-features = false, optional = true }
-
-[patch.crates-io]
-opus-ng = { path = "../opus-ng" }

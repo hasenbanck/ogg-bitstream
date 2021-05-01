@@ -4,7 +4,7 @@ use std::error::Error;
 
 /// Errors that can occur when writing OGG bitstreams.
 #[derive(Debug)]
-pub enum BitstreamWriteError {
+pub enum WriteError {
     /// A `std::io::Error`.
     IoError(std::io::Error),
     /// A `std::num::TryFromIntError`.
@@ -17,45 +17,45 @@ pub enum BitstreamWriteError {
     InitialPacketTooBig,
 }
 
-impl std::fmt::Display for BitstreamWriteError {
+impl std::fmt::Display for WriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BitstreamWriteError::IoError(err) => {
+            WriteError::IoError(err) => {
                 write!(f, "{:?}", err.source())
             }
-            BitstreamWriteError::TryFromIntError(err) => {
+            WriteError::TryFromIntError(err) => {
                 write!(f, "{:?}", err.source())
             }
-            BitstreamWriteError::UnknownBitstreamSerialNumber => {
+            WriteError::UnknownBitstreamSerialNumber => {
                 write!(f, "unknown bitstream serial number")
             }
-            BitstreamWriteError::BitstreamAlreadyInitialized => {
+            WriteError::BitstreamAlreadyInitialized => {
                 write!(f, "logical bitstream already initialized")
             }
-            BitstreamWriteError::InitialPacketTooBig => {
+            WriteError::InitialPacketTooBig => {
                 write!(f, "initial packet too big. Max size: 65_025 byte")
             }
         }
     }
 }
 
-impl From<std::io::Error> for BitstreamWriteError {
-    fn from(err: std::io::Error) -> BitstreamWriteError {
-        BitstreamWriteError::IoError(err)
+impl From<std::io::Error> for WriteError {
+    fn from(err: std::io::Error) -> WriteError {
+        WriteError::IoError(err)
     }
 }
 
-impl From<std::num::TryFromIntError> for BitstreamWriteError {
-    fn from(err: std::num::TryFromIntError) -> BitstreamWriteError {
-        BitstreamWriteError::TryFromIntError(err)
+impl From<std::num::TryFromIntError> for WriteError {
+    fn from(err: std::num::TryFromIntError) -> WriteError {
+        WriteError::TryFromIntError(err)
     }
 }
 
-impl std::error::Error for BitstreamWriteError {
+impl std::error::Error for WriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            BitstreamWriteError::IoError(ref e) => Some(e),
-            BitstreamWriteError::TryFromIntError(ref e) => Some(e),
+            WriteError::IoError(ref e) => Some(e),
+            WriteError::TryFromIntError(ref e) => Some(e),
             _ => None,
         }
     }

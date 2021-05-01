@@ -6,10 +6,10 @@ use std::ops::Range;
 
 use crate::crc32::crc32;
 use crate::{
-    parse_u32_le, parse_u64_le, BitstreamReadError, BITSTREAM_SERIAL_NUMBER_RANGE,
-    CONST_HEADER_DATA_RANGE, CRC32_RANGE, GRANULE_POSITION_RANGE, HEADER_RANGE, HEADER_TYPE_INDEX,
-    MAX_PAGE_SIZE, PAGER_MARKER, PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX,
-    SEGMENT_TABLE_INDEX, VERSION_INDEX,
+    parse_u32_le, parse_u64_le, ReadError, BITSTREAM_SERIAL_NUMBER_RANGE, BOS_VALUE,
+    CONST_HEADER_DATA_RANGE, CONTINUATION_VALUE, CRC32_RANGE, EOS_VALUE, GRANULE_POSITION_RANGE,
+    HEADER_RANGE, HEADER_TYPE_INDEX, MAX_PAGE_SIZE, PAGER_MARKER, PAGE_SEQUENCE_NUMBER_RANGE,
+    SEGMENT_COUNT_INDEX, SEGMENT_TABLE_INDEX, VERSION_INDEX,
 };
 
 macro_rules! handle_eof {
@@ -84,12 +84,12 @@ struct QueuedPacket {
 
 /// Generic OGG bitstream file reader.
 #[derive(Clone, Debug)]
-pub struct BitStreamFileReader<R: Read + Seek> {
+pub struct FileReader<R: Read + Seek> {
     inner: BitStreamReader,
     reader: R,
 }
 
-impl<R: Read + Seek> BitStreamFileReader<R> {
+impl<R: Read + Seek> FileReader<R> {
     /// Creates a new `BitStreamFileReader`.
     pub fn new(reader: R) -> Self {
         Self {
@@ -110,7 +110,7 @@ impl<R: Read + Seek> BitStreamFileReader<R> {
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
     /// was corrupt / invalid and no data was written into the given frame.
-    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, BitstreamReadError> {
+    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
         self.inner.read_packet(&mut self.reader, packet)
     }
 
@@ -123,7 +123,7 @@ impl<R: Read + Seek> BitStreamFileReader<R> {
         &mut self,
         bitstream_serial_number: u32,
         target_granule_position: u64,
-    ) -> Result<(), BitstreamReadError> {
+    ) -> Result<(), ReadError> {
         self.inner.seek(
             &mut self.reader,
             bitstream_serial_number,
@@ -134,12 +134,12 @@ impl<R: Read + Seek> BitStreamFileReader<R> {
 
 /// Generic OGG bitstream stream reader.
 #[derive(Clone, Debug)]
-pub struct BitStreamStreamReader<R: Read> {
+pub struct StreamReader<R: Read> {
     inner: BitStreamReader,
     reader: R,
 }
 
-impl<R: Read> BitStreamStreamReader<R> {
+impl<R: Read> StreamReader<R> {
     /// Creates a new `BitStreamStreamReader`.
     pub fn new(reader: R) -> Self {
         Self {
@@ -160,7 +160,7 @@ impl<R: Read> BitStreamStreamReader<R> {
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
     /// was corrupt / invalid and no data was written into the given frame.
-    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, BitstreamReadError> {
+    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
         self.inner.read_packet(&mut self.reader, packet)
     }
 }
@@ -193,7 +193,7 @@ impl BitStreamReader {
         &mut self,
         reader: &mut R,
         packet: &mut Packet,
-    ) -> Result<ReadStatus, BitstreamReadError> {
+    ) -> Result<ReadStatus, ReadError> {
         packet.data.clear();
 
         let is_last_packet = self.queued_packets.len() == 1;
@@ -237,12 +237,12 @@ impl BitStreamReader {
                 parse_u32_le(&self.page_buffer[BITSTREAM_SERIAL_NUMBER_RANGE]);
             let page_sequence_number = parse_u32_le(&self.page_buffer[PAGE_SEQUENCE_NUMBER_RANGE]);
 
-            let is_continuation = header_type & 0x1 == 1;
-            let is_bos = (header_type & 0x2) >> 1 == 1;
-            let is_eos = (header_type & 0x4) >> 2 == 1;
+            let is_continuation = header_type & CONTINUATION_VALUE == 1;
+            let is_bos = (header_type & BOS_VALUE) >> 1 == 1;
+            let is_eos = (header_type & EOS_VALUE) >> 2 == 1;
 
             if version != 0 {
-                return Err(BitstreamReadError::UnhandledBitstreamVersion(version));
+                return Err(ReadError::UnhandledBitstreamVersion(version));
             }
 
             self.current_bitstream_serial_number = bitstream_serial_number;
@@ -285,7 +285,7 @@ impl BitStreamReader {
         &mut self,
         packet: &mut Packet,
         data_range: Range<usize>,
-    ) -> Result<(), BitstreamReadError> {
+    ) -> Result<(), ReadError> {
         packet.data.write_all(&self.page_buffer[data_range])?;
         packet.bitstream_serial_number = self.current_bitstream_serial_number;
         packet.granule_position = self.current_granule_position;
@@ -295,7 +295,7 @@ impl BitStreamReader {
         Ok(())
     }
 
-    fn sync_with_next_page<R: Read>(&self, reader: &mut R) -> Result<(), BitstreamReadError> {
+    fn sync_with_next_page<R: Read>(&self, reader: &mut R) -> Result<(), ReadError> {
         let mut buffer = [0_u8; 4];
 
         // Fast path.
@@ -327,7 +327,7 @@ impl BitStreamReader {
             }
         }
 
-        Err(BitstreamReadError::UnableToSync)
+        Err(ReadError::UnableToSync)
     }
 
     fn verify_crc32(&mut self, page_size: usize) -> bool {
@@ -341,7 +341,7 @@ impl BitStreamReader {
         target_crc == crc32
     }
 
-    fn read_page_data<R: Read>(&mut self, reader: &mut R) -> Result<usize, BitstreamReadError> {
+    fn read_page_data<R: Read>(&mut self, reader: &mut R) -> Result<usize, ReadError> {
         PAGER_MARKER
             .iter()
             .enumerate()
@@ -399,7 +399,7 @@ impl BitStreamReader {
         reader: &mut R,
         bitstream_serial_number: u32,
         target_granule_position: u64,
-    ) -> Result<(), BitstreamReadError> {
+    ) -> Result<(), ReadError> {
         // We assume that packets that spawn multiple pages end in their own page without
         // any other packets in that page.
         // This is currently the behavior the major media mappings (vorbis, opus, flac).
@@ -477,7 +477,7 @@ impl BitStreamReader {
         &mut self,
         reader: &mut R,
         bitstream_serial_number: u32,
-    ) -> Result<SearchResult, BitstreamReadError> {
+    ) -> Result<SearchResult, ReadError> {
         let mut search_start = reader.stream_position()?;
         let mut packet_start = u64::MAX;
         let mut search_buffer = [0_u8; 64];
@@ -485,7 +485,7 @@ impl BitStreamReader {
         'outer: loop {
             let read = reader.read(&mut search_buffer)?;
             if read == 0 {
-                return Err(BitstreamReadError::IoError(std::io::Error::new(
+                return Err(ReadError::IoError(std::io::Error::new(
                     ErrorKind::UnexpectedEof,
                     "EOF while parsing sync markers",
                 )));
@@ -537,7 +537,7 @@ impl BitStreamReader {
         &mut self,
         reader: &mut R,
         page_start: u64,
-    ) -> Result<ProbeResult, BitstreamReadError> {
+    ) -> Result<ProbeResult, ReadError> {
         reader.seek(SeekFrom::Start(page_start))?;
         reader.read_exact(&mut self.page_buffer[HEADER_RANGE])?;
 
@@ -604,7 +604,7 @@ mod tests {
         ];
         let c = Cursor::new(d);
 
-        let mut br = BitStreamFileReader::new(c);
+        let mut br = FileReader::new(c);
         let mut packet = Packet::default();
         let res = br.read_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
@@ -620,7 +620,7 @@ mod tests {
         ];
         let c = Cursor::new(d);
 
-        let mut br = BitStreamFileReader::new(c);
+        let mut br = FileReader::new(c);
         let mut packet = Packet::default();
         let res = br.read_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
