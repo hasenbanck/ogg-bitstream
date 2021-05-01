@@ -3,9 +3,10 @@ use std::io::Write;
 
 use crate::crc32::crc32;
 use crate::{
-    WriteError, BITSTREAM_SERIAL_NUMBER_RANGE, BOS_VALUE, CRC32_RANGE, GRANULE_POSITION_RANGE,
-    HEADER_TYPE_INDEX, MAX_PAGE_DATA_SIZE, MAX_PAGE_SIZE, PAGER_MARKER, PAGER_MARKER_RANGE,
-    PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX, SEGMENT_TABLE_INDEX,
+    WriteError, BITSTREAM_SERIAL_NUMBER_RANGE, BOS_VALUE, CONTINUATION_VALUE, CRC32_RANGE,
+    EOS_VALUE, GRANULE_POSITION_RANGE, HEADER_TYPE_INDEX, MAX_PAGE_DATA_SIZE, MAX_PAGE_SIZE,
+    PAGER_MARKER, PAGER_MARKER_RANGE, PAGE_SEQUENCE_NUMBER_RANGE, SEGMENT_COUNT_INDEX,
+    SEGMENT_TABLE_INDEX,
 };
 
 #[derive(Clone, Debug)]
@@ -83,23 +84,22 @@ impl<W: Write> StreamWriter<W> {
             ..Default::default()
         };
 
-        let size = first_packet_data.len();
-        state.packet_sizes.push(size);
-        state.data_head = size;
-        state.data_buffer[..state.data_head].copy_from_slice(&first_packet_data[..state.data_head]);
         state.header_type = BOS_VALUE;
-
+        push_packet(&mut state, &first_packet_data);
         write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
+
+        state.header_type = 0x0;
 
         Ok(())
     }
 
     /// Ends the logical stream. Caller needs to provide the last packet, which will be
-    /// written to the writer right away. Any open pages for this stream will be flushed.
+    /// written by the writer right away. Any open pages for this stream will be flushed.
     pub fn end_logical_stream(
         &mut self,
         bitstream_serial_number: u32,
-        _last_packet_data: &[u8],
+        last_packet_data: &[u8],
+        granule_position: u64,
     ) -> Result<(), WriteError> {
         let index = self
             .stream_states
@@ -109,32 +109,90 @@ impl<W: Write> StreamWriter<W> {
             .map(|(id, _)| id)
             .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
-        let state = self.stream_states.remove(index);
+        let mut state = self.stream_states.remove(index);
 
-        // TODO flush existing data
-        // TODO write the last_packet_data (set the header_type)
+        if state.data_head != 0 {
+            write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
+        }
 
-        todo!()
+        state.header_type = EOS_VALUE;
+        state.granule_position = granule_position;
+        push_packet(&mut state, &last_packet_data);
+        write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
+
+        Ok(())
     }
 
-    /// Writes the given data as a packet into the writer for the specified logical bitstream.
-    /// Caller need to begin a stream with `begin_logical_stream` and close it with
-    /// `end_logical_stream()`.
+    /// Queues the the given data as a packet to be written to the writer for the specified
+    /// logical bitstream. Caller need to begin a stream with `begin_logical_stream` and
+    /// close it with `end_logical_stream()`.
     ///
-    /// Pages are written once a packet doesn't fit into it's free space, the granule position
-    /// changed between packets or `flush()` was called manually.
+    /// Packets are assembles in pages, which are written once a packet doesn't fit into it's
+    /// free space or `flush()` was called manually.
     ///
     /// Packets will be split into multiple pages if they are bigger than the biggest allowed
     /// data page size of 65_025 B.
-    pub fn write_packet(
-        _bitstream_serial_number: u64,
-        _packet_data: &[u8],
-        _granule_position: u64,
+    pub fn push_packet(
+        &mut self,
+        bitstream_serial_number: u32,
+        packet_data: &[u8],
+        granule_position: u64,
     ) -> Result<(), WriteError> {
-        // TODO If the current paket doesn't fit on the current page, flush the page and start a new.
-        //      Set the continuation flag in that case.
+        let state = self
+            .stream_states
+            .iter_mut()
+            .find(|s| s.bitstream_serial_number == bitstream_serial_number)
+            .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
-        todo!()
+        let mut size = packet_data.len();
+
+        // Flush page if the new data doesn't fit into the free space.
+        if state.data_head != 0 && state.data_head + size > MAX_PAGE_DATA_SIZE {
+            write_page(&mut self.writer, &mut self.page_buffer, state)?;
+        }
+
+        // If the data then fits on the page, we safe it and return.
+        if state.data_head + size <= MAX_PAGE_DATA_SIZE {
+            state.granule_position = granule_position;
+            push_packet(state, packet_data);
+
+            if state.data_head == MAX_PAGE_DATA_SIZE {
+                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+            }
+
+            return Ok(());
+        }
+
+        // The data even after flushing is bigger than a page,
+        // so we will split it into multiple pages.
+        let mut is_first_page = true;
+        let mut offset = 0;
+        loop {
+            if is_first_page {
+                is_first_page = false;
+                state.header_type = 0x0;
+            } else {
+                state.header_type = CONTINUATION_VALUE;
+            }
+
+            // Specification said that only the last page should have the proper granule position set.
+            if size <= MAX_PAGE_DATA_SIZE {
+                state.granule_position = granule_position;
+                push_packet(state, &packet_data[offset..offset + size]);
+                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+                break;
+            } else {
+                state.granule_position = u64::MAX;
+                push_packet(state, &packet_data[offset..offset + MAX_PAGE_DATA_SIZE]);
+                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+                offset += MAX_PAGE_DATA_SIZE;
+                size -= MAX_PAGE_DATA_SIZE;
+            }
+        }
+
+        state.header_type = 0x0;
+
+        Ok(())
     }
 
     /// The current page of the logical bitstream is written and a new page is started.
@@ -150,6 +208,25 @@ impl<W: Write> StreamWriter<W> {
 
         Ok(())
     }
+
+    /// Returns true if the current page for the given logical bitstream is empty.
+    pub fn page_is_empty(&mut self, bitstream_serial_number: u32) -> Result<bool, WriteError> {
+        let state = self
+            .stream_states
+            .iter()
+            .find(|s| s.bitstream_serial_number == bitstream_serial_number)
+            .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
+
+        Ok(state.data_head == 0)
+    }
+}
+
+fn push_packet(state: &mut StreamState, packet_data: &[u8]) {
+    let size = packet_data.len();
+    state.packet_sizes.push(size);
+    state.data_buffer[state.data_head..state.data_head + size]
+        .copy_from_slice(&packet_data[state.data_head..state.data_head + size]);
+    state.data_head += size;
 }
 
 fn write_page<W: Write>(
@@ -276,4 +353,11 @@ mod tests {
             offset += SEGMENT_TABLE_INDEX + 5;
         }
     }
+
+    // TODO test the writing of packets
+    // TODO if we flush pages (with empty data).
+    // TODO test the flushing on packets if full
+    // TODO test the "continuation" of packets.
+    // TODO above test just for EOS
+    // TODO test if EOS flushes the last page.
 }

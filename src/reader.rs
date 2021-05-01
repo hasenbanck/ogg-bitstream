@@ -110,12 +110,14 @@ impl<R: Read + Seek> FileReader<R> {
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
     /// was corrupt / invalid and no data was written into the given packet.
-    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
-        self.inner.read_packet(&mut self.reader, packet)
+    pub fn next_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
+        self.inner.next_packet(&mut self.reader, packet)
     }
 
     /// Seeks to the first page that has an granule position greater or equal
     /// to th given one for the given logical bitstream.
+    ///
+    /// Does not support seeking in chained files (like live stream recordings).
     ///
     /// If the user is seeking outside of the stream, `read_packet()`
     /// will return the packets of the last page.
@@ -160,8 +162,8 @@ impl<R: Read> StreamReader<R> {
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
     /// was corrupt / invalid and no data was written into the given packet.
-    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
-        self.inner.read_packet(&mut self.reader, packet)
+    pub fn next_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
+        self.inner.next_packet(&mut self.reader, packet)
     }
 }
 
@@ -189,7 +191,7 @@ impl Default for BitStreamReader {
 }
 
 impl BitStreamReader {
-    fn read_packet<R: Read>(
+    fn next_packet<R: Read>(
         &mut self,
         reader: &mut R,
         packet: &mut Packet,
@@ -606,7 +608,7 @@ mod tests {
 
         let mut br = FileReader::new(c);
         let mut packet = Packet::default();
-        let res = br.read_packet(&mut packet).unwrap();
+        let res = br.next_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
     }
 
@@ -622,7 +624,7 @@ mod tests {
 
         let mut br = FileReader::new(c);
         let mut packet = Packet::default();
-        let res = br.read_packet(&mut packet).unwrap();
+        let res = br.next_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
     }
 }
