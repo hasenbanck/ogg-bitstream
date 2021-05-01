@@ -627,4 +627,11 @@ mod tests {
         let res = br.next_packet(&mut packet).unwrap();
         assert_eq!(res, ReadStatus::Ok)
     }
+
+    // TODO write a test for reading packets (feeding data with the writer)
+    // TODO write a test for seeking to 0
+    // TODO write a test for seeking to u64::MAX
+    // TODO write a test for seeking to outside of the data
+    // TODO write a test for seeking exactly
+    // TODO write a test for seeking near zero
 }

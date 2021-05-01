@@ -86,9 +86,10 @@ impl<W: Write> StreamWriter<W> {
 
         state.header_type = BOS_VALUE;
         push_packet(&mut state, &first_packet_data);
-        write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
-
+        write_page(&mut self.writer, &mut state, &mut self.page_buffer)?;
         state.header_type = 0x0;
+
+        self.stream_states.push(state);
 
         Ok(())
     }
@@ -112,13 +113,13 @@ impl<W: Write> StreamWriter<W> {
         let mut state = self.stream_states.remove(index);
 
         if state.data_head != 0 {
-            write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
+            write_page(&mut self.writer, &mut state, &mut self.page_buffer)?;
         }
 
         state.header_type = EOS_VALUE;
         state.granule_position = granule_position;
         push_packet(&mut state, &last_packet_data);
-        write_page(&mut self.writer, &mut self.page_buffer, &mut state)?;
+        write_page(&mut self.writer, &mut state, &mut self.page_buffer)?;
 
         Ok(())
     }
@@ -148,7 +149,7 @@ impl<W: Write> StreamWriter<W> {
 
         // Flush page if the new data doesn't fit into the free space.
         if state.data_head != 0 && state.data_head + size > MAX_PAGE_DATA_SIZE {
-            write_page(&mut self.writer, &mut self.page_buffer, state)?;
+            write_page(&mut self.writer, state, &mut self.page_buffer)?;
         }
 
         // If the data then fits on the page, we safe it and return.
@@ -157,7 +158,7 @@ impl<W: Write> StreamWriter<W> {
             push_packet(state, packet_data);
 
             if state.data_head == MAX_PAGE_DATA_SIZE {
-                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+                write_page(&mut self.writer, state, &mut self.page_buffer)?;
             }
 
             return Ok(());
@@ -179,12 +180,12 @@ impl<W: Write> StreamWriter<W> {
             if size <= MAX_PAGE_DATA_SIZE {
                 state.granule_position = granule_position;
                 push_packet(state, &packet_data[offset..offset + size]);
-                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+                write_page(&mut self.writer, state, &mut self.page_buffer)?;
                 break;
             } else {
                 state.granule_position = u64::MAX;
                 push_packet(state, &packet_data[offset..offset + MAX_PAGE_DATA_SIZE]);
-                write_page(&mut self.writer, &mut self.page_buffer, state)?;
+                write_page(&mut self.writer, state, &mut self.page_buffer)?;
                 offset += MAX_PAGE_DATA_SIZE;
                 size -= MAX_PAGE_DATA_SIZE;
             }
@@ -204,12 +205,12 @@ impl<W: Write> StreamWriter<W> {
             .find(|s| s.bitstream_serial_number == bitstream_serial_number)
             .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
-        write_page(&mut self.writer, &mut self.page_buffer, state)?;
+        write_page(&mut self.writer, state, &mut self.page_buffer)?;
 
         Ok(())
     }
 
-    /// Returns true if the current page for the given logical bitstream is empty.
+    /// Returns true if the current page for the given logical bitstream contains no data.
     pub fn page_is_empty(&mut self, bitstream_serial_number: u32) -> Result<bool, WriteError> {
         let state = self
             .stream_states
@@ -231,8 +232,8 @@ fn push_packet(state: &mut StreamState, packet_data: &[u8]) {
 
 fn write_page<W: Write>(
     writer: &mut W,
-    page_buffer: &mut [u8],
     state: &mut StreamState,
+    page_buffer: &mut [u8],
 ) -> Result<(), WriteError> {
     // Write out the segment table.
     let mut segment_count: u8 = 0;
@@ -293,71 +294,135 @@ mod tests {
 
     use super::*;
 
+    fn assert_packet(
+        buffer: &[u8],
+        offset: usize,
+        header_type: u8,
+        bitstream_serial_number: u32,
+        granule_position: u64,
+        page_sequence_number: u32,
+        packet_data: Vec<&[u8]>,
+    ) -> usize {
+        assert_eq!(
+            &buffer[PAGER_MARKER_RANGE.start + offset..PAGER_MARKER_RANGE.end + offset],
+            &PAGER_MARKER
+        );
+        assert_eq!(buffer[VERSION_INDEX + offset], 0);
+        assert_eq!(buffer[HEADER_TYPE_INDEX + offset], header_type);
+        assert_eq!(
+            parse_u64_le(
+                &buffer[GRANULE_POSITION_RANGE.start + offset..GRANULE_POSITION_RANGE.end + offset]
+            ),
+            granule_position
+        );
+        assert_eq!(
+            parse_u32_le(
+                &buffer[BITSTREAM_SERIAL_NUMBER_RANGE.start + offset
+                    ..BITSTREAM_SERIAL_NUMBER_RANGE.end + offset]
+            ),
+            bitstream_serial_number
+        );
+        assert_eq!(
+            parse_u32_le(
+                &buffer[PAGE_SEQUENCE_NUMBER_RANGE.start + offset
+                    ..PAGE_SEQUENCE_NUMBER_RANGE.end + offset]
+            ),
+            page_sequence_number
+        );
+
+        let mut segment_count: u8 = 0;
+        for data in packet_data.iter() {
+            let size = data.len();
+            let full_segments = u8::try_from(size / 255).unwrap();
+            for _ in 0..full_segments {
+                let byte = buffer[SEGMENT_TABLE_INDEX + offset + usize::from(segment_count)];
+                assert_eq!(byte, 255);
+                segment_count += 1;
+            }
+
+            let remainder = u8::try_from(size % 255).unwrap();
+            if remainder > 0 {
+                let byte = buffer[SEGMENT_TABLE_INDEX + offset + usize::from(segment_count)];
+                assert_eq!(byte, remainder);
+                segment_count += 1;
+            }
+        }
+
+        let segment_table_size = usize::from(segment_count);
+        let mut data_size = 0;
+        for data in packet_data.iter() {
+            let size = data.len();
+            let data_offset = SEGMENT_TABLE_INDEX + offset + segment_table_size + data_size;
+            assert_eq!(&buffer[data_offset..data_offset + size], *data);
+
+            data_size += size;
+        }
+
+        assert_eq!(buffer[offset + SEGMENT_COUNT_INDEX], segment_count);
+
+        // Return the size of the packet to easier travers the buffer.
+        SEGMENT_TABLE_INDEX + segment_table_size + data_size
+    }
+
     #[test]
-    fn test_begin_streams() {
+    fn test_bos_eos() {
         let buffer: Vec<u8> = vec![];
         let cursor = Cursor::new(buffer);
 
         let mut bw = StreamWriter::new(cursor);
 
         let streams = [
-            (12, [0xFF, 0xFF, 0xFF, 0xFF]),
-            (42, [0xAA, 0xAA, 0xAA, 0xAA]),
-            (99, [0x11, 0x11, 0x11, 0x11]),
-            (21, [0x55, 0x44, 0x33, 0x22]),
+            (11, [0x11, 0x11, 0x11, 0x11]),
+            (12, [0x22, 0x22, 0x22, 0x22]),
+            (13, [0x33, 0x33, 0x33, 0x33]),
+            (14, [0x44, 0x44, 0x44, 0x44]),
         ];
 
         for stream in &streams {
             bw.begin_logical_stream(stream.0, &stream.1).unwrap();
         }
 
+        for stream in &streams {
+            bw.end_logical_stream(stream.0, &stream.1, 126).unwrap();
+        }
+
         let cursor = bw.into_inner();
         let buffer = cursor.into_inner();
 
         let mut offset = 0;
-        for stream in &streams {
-            assert_eq!(
-                &buffer[offset + PAGER_MARKER_RANGE.start..offset + PAGER_MARKER_RANGE.end],
-                &PAGER_MARKER
-            );
-            assert_eq!(buffer[offset + VERSION_INDEX], 0);
-            assert_eq!(buffer[offset + HEADER_TYPE_INDEX], BOS_VALUE);
-            assert_eq!(
-                parse_u64_le(
-                    &buffer[offset + GRANULE_POSITION_RANGE.start
-                        ..offset + GRANULE_POSITION_RANGE.end]
-                ),
-                0
-            );
-            assert_eq!(
-                parse_u32_le(
-                    &buffer[offset + BITSTREAM_SERIAL_NUMBER_RANGE.start
-                        ..offset + BITSTREAM_SERIAL_NUMBER_RANGE.end]
-                ),
-                stream.0
-            );
-            assert_eq!(
-                parse_u32_le(
-                    &buffer[offset + PAGE_SEQUENCE_NUMBER_RANGE.start
-                        ..offset + PAGE_SEQUENCE_NUMBER_RANGE.end]
-                ),
-                0
-            );
-            assert_eq!(buffer[offset + SEGMENT_COUNT_INDEX], 1);
-            assert_eq!(buffer[offset + SEGMENT_TABLE_INDEX], 4);
-            assert_eq!(
-                &buffer[offset + SEGMENT_TABLE_INDEX + 1..offset + SEGMENT_TABLE_INDEX + 5],
-                &stream.1
+        for (bitstream_serial_number, packet_data) in &streams {
+            let size = assert_packet(
+                &buffer,
+                offset,
+                BOS_VALUE,
+                *bitstream_serial_number,
+                0,
+                0,
+                vec![packet_data],
             );
 
-            offset += SEGMENT_TABLE_INDEX + 5;
+            offset += size;
+        }
+
+        for (bitstream_serial_number, packet_data) in &streams {
+            let size = assert_packet(
+                &buffer,
+                offset,
+                EOS_VALUE,
+                *bitstream_serial_number,
+                126,
+                1,
+                vec![packet_data],
+            );
+
+            offset += size;
         }
     }
 
+    // TODO is_empty
     // TODO test the writing of packets
     // TODO if we flush pages (with empty data).
     // TODO test the flushing on packets if full
     // TODO test the "continuation" of packets.
-    // TODO above test just for EOS
     // TODO test if EOS flushes the last page.
 }
