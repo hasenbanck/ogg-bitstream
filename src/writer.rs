@@ -33,7 +33,7 @@ impl Default for StreamState {
     }
 }
 
-/// Generic OGG bitstream stream writer.
+/// Generic OGG stream writer.
 #[derive(Clone, Debug)]
 pub struct StreamWriter<W: Write> {
     writer: W,
@@ -42,7 +42,7 @@ pub struct StreamWriter<W: Write> {
 }
 
 impl<W: Write> StreamWriter<W> {
-    /// Creates a new `BitStreamStreamWriter`.
+    /// Creates a new `StreamWriter`.
     pub fn new(writer: W) -> Self {
         let mut page_buffer = vec![0_u8; MAX_PAGE_SIZE];
         page_buffer[PAGER_MARKER_RANGE].copy_from_slice(&PAGER_MARKER);
@@ -54,7 +54,7 @@ impl<W: Write> StreamWriter<W> {
         }
     }
 
-    /// Consumes the `BitStreamStreamWriter` and returns the writer.
+    /// Consumes the `StreamWriter` and returns the writer.
     pub fn into_inner(self) -> W {
         self.writer
     }

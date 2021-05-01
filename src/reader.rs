@@ -82,7 +82,7 @@ struct QueuedPacket {
     is_complete: bool,
 }
 
-/// Generic OGG bitstream file reader.
+/// Generic OGG file reader.
 #[derive(Clone, Debug)]
 pub struct FileReader<R: Read + Seek> {
     inner: BitStreamReader,
@@ -90,7 +90,7 @@ pub struct FileReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> FileReader<R> {
-    /// Creates a new `BitStreamFileReader`.
+    /// Creates a new `FileReader`.
     pub fn new(reader: R) -> Self {
         Self {
             inner: Default::default(),
@@ -98,7 +98,7 @@ impl<R: Read + Seek> FileReader<R> {
         }
     }
 
-    /// Consumes the `BitStreamFileReader` and returns the reader.
+    /// Consumes the `FileReader` and returns the reader.
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -109,7 +109,7 @@ impl<R: Read + Seek> FileReader<R> {
     /// missing packets and out of sync events.
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
-    /// was corrupt / invalid and no data was written into the given frame.
+    /// was corrupt / invalid and no data was written into the given packet.
     pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
         self.inner.read_packet(&mut self.reader, packet)
     }
@@ -132,7 +132,7 @@ impl<R: Read + Seek> FileReader<R> {
     }
 }
 
-/// Generic OGG bitstream stream reader.
+/// Generic OGG stream reader.
 #[derive(Clone, Debug)]
 pub struct StreamReader<R: Read> {
     inner: BitStreamReader,
@@ -140,7 +140,7 @@ pub struct StreamReader<R: Read> {
 }
 
 impl<R: Read> StreamReader<R> {
-    /// Creates a new `BitStreamStreamReader`.
+    /// Creates a new `StreamReader`.
     pub fn new(reader: R) -> Self {
         Self {
             inner: Default::default(),
@@ -148,7 +148,7 @@ impl<R: Read> StreamReader<R> {
         }
     }
 
-    /// Consumes the `BitStreamStreamReader` and returns the reader.
+    /// Consumes the `StreamReader` and returns the reader.
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -159,7 +159,7 @@ impl<R: Read> StreamReader<R> {
     /// missing packets and out of sync events.
     ///
     /// Returns the status of the operation. When receiving `ReadStatus::MissingPacket` a page
-    /// was corrupt / invalid and no data was written into the given frame.
+    /// was corrupt / invalid and no data was written into the given packet.
     pub fn read_packet(&mut self, packet: &mut Packet) -> Result<ReadStatus, ReadError> {
         self.inner.read_packet(&mut self.reader, packet)
     }
@@ -509,7 +509,7 @@ impl BitStreamReader {
                         continue 'outer;
                     }
 
-                    packet_start = packet_start.min(page.start);
+                    packet_start = u64::min(packet_start, page.start);
 
                     if page.granule_position == u64::MAX {
                         reader.seek(SeekFrom::Start(page.end))?;
