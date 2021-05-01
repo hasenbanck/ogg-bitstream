@@ -4,6 +4,46 @@
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
 //! Reads and writes OGG bitstreams.
+//!
+//!
+//! # Reader example
+//!
+//! ```ignore
+//! use ogg_bitstream::*;
+//! use std::fs::File;
+//! # fn main() -> Result<(), ReadError> {
+//!
+//! let file = File::open("foo.ogg")?;
+//!
+//! let mut sr = StreamReader::new(file);
+//! let mut packet = Packet::default();
+//!
+//! let res = sr.next_packet(&mut packet)?;
+//! assert_eq!(res, ReadStatus::Ok);
+//!
+//! #     Ok(())
+//! # }
+//! ```
+//!
+//! # Writer example
+//!
+//! ```rust
+//! use ogg_bitstream::*;
+//! # fn main() -> Result<(), WriteError> {
+//!
+//! let buffer: Vec<u8> = vec![];
+//! let cursor = std::io::Cursor::new(buffer);
+//!
+//! let mut sw = StreamWriter::new(cursor);
+//! let uid = generate_bitstream_serial_number();
+//!
+//! sw.begin_logical_stream(uid, &[0x0, 0x1, 0x2, 0x3])?;
+//! sw.push_packet(uid, &[0x5, 0x6, 0x7, 0x8], 10)?;
+//! sw.end_logical_stream(uid, &[0x9, 0xA, 0xB, 0xC], 99)?;
+//!
+//! #     Ok(())
+//! # }
+//! ```
 
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
