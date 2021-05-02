@@ -197,7 +197,6 @@ impl<W: Write> StreamWriter<W> {
     }
 
     /// The current page of the logical bitstream is written and a new page is started.
-    /// Flushing empty pages is valid.
     pub fn flush(&mut self, bitstream_serial_number: u32) -> Result<(), WriteError> {
         let state = self
             .stream_states
@@ -205,7 +204,9 @@ impl<W: Write> StreamWriter<W> {
             .find(|s| s.bitstream_serial_number == bitstream_serial_number)
             .ok_or(WriteError::UnknownBitstreamSerialNumber)?;
 
-        write_page(&mut self.writer, state, &mut self.page_buffer)?;
+        if state.data_head != 0 {
+            write_page(&mut self.writer, state, &mut self.page_buffer)?;
+        }
 
         Ok(())
     }
@@ -294,7 +295,7 @@ mod tests {
 
     use super::*;
 
-    fn assert_packet(
+    fn assert_page(
         buffer: &[u8],
         offset: usize,
         header_type: u8,
@@ -391,7 +392,7 @@ mod tests {
 
         let mut offset = 0;
         for (bitstream_serial_number, packet_data) in &streams {
-            let size = assert_packet(
+            let size = assert_page(
                 &buffer,
                 offset,
                 BOS_VALUE,
@@ -405,7 +406,7 @@ mod tests {
         }
 
         for (bitstream_serial_number, packet_data) in &streams {
-            let size = assert_packet(
+            let size = assert_page(
                 &buffer,
                 offset,
                 EOS_VALUE,
@@ -419,9 +420,52 @@ mod tests {
         }
     }
 
-    // TODO is_empty
-    // TODO test the writing of packets
-    // TODO if we flush pages (with empty data).
+    #[test]
+    fn test_is_empty() {
+        let buffer: Vec<u8> = vec![];
+        let cursor = Cursor::new(buffer);
+
+        let mut bw = StreamWriter::new(cursor);
+
+        bw.begin_logical_stream(11, &[0x0, 0x1, 0x2, 0x4]).unwrap();
+        assert!(bw.page_is_empty(11).unwrap());
+
+        bw.push_packet(11, &[0x0, 0x1, 0x2, 0x4], 12).unwrap();
+        assert!(!bw.page_is_empty(11).unwrap());
+    }
+
+    #[test]
+    fn test_write() {
+        let buffer: Vec<u8> = vec![];
+        let cursor = Cursor::new(buffer);
+
+        let mut bw = StreamWriter::new(cursor);
+        bw.begin_logical_stream(42, &[0x0, 0x1, 0x2, 0x4]).unwrap();
+        bw.push_packet(42, &[0xFF, 0xFF], 127).unwrap();
+        bw.flush(42).unwrap();
+
+        let cursor = bw.into_inner();
+        let buffer = cursor.into_inner();
+
+        let offset = assert_page(&buffer, 0, BOS_VALUE, 42, 0, 0, vec![&[0x0, 0x1, 0x2, 0x4]]);
+        assert_page(&buffer, offset, 0, 42, 127, 1, vec![&[0xFF, 0xFF]]);
+    }
+
+    #[test]
+    fn test_dont_flush_empty_page() {
+        let buffer: Vec<u8> = vec![];
+        let cursor = Cursor::new(buffer);
+
+        let mut bw = StreamWriter::new(cursor);
+        bw.begin_logical_stream(42, &[0x0, 0x1, 0x2, 0x4]).unwrap();
+        bw.flush(42).unwrap();
+
+        let cursor = bw.into_inner();
+        let buffer = cursor.into_inner();
+
+        assert_eq!(buffer.len(), 32)
+    }
+
     // TODO test the flushing on packets if full
     // TODO test the "continuation" of packets.
     // TODO test if EOS flushes the last page.

@@ -10,7 +10,7 @@ Reads and writes OGG bitstreams.
 
 ## Overview
 
-Implements the following specifications:
+Implements the following specification:
 
 * [rfc3533](https://tools.ietf.org/html/rfc3533.html)
 
