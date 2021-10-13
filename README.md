@@ -1,7 +1,5 @@
 # ogg-bitstream
 
-[![Latest version](https://img.shields.io/crates/v/ogg-bitstream.svg)](https://crates.io/crates/ogg-bitstream)
-[![Documentation](https://docs.rs/ogg-bitstream/badge.svg)](https://docs.rs/ogg-bitstream)
 ![ZLIB](https://img.shields.io/badge/license-zlib-blue.svg)
 ![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Apache](https://img.shields.io/badge/license-Apache-blue.svg)
